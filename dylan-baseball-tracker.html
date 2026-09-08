@@ -464,6 +464,51 @@
             padding: 12px 0;
             text-align: center;
         }
+
+        .admin-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+            color: #9ca3af;
+            margin-bottom: 16px;
+        }
+
+        .admin-bar a {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .admin-bar a:hover {
+            text-decoration: underline;
+        }
+
+        .admin-bar.is-admin {
+            color: #059669;
+        }
+
+        input:disabled {
+            background: #f3f4f6;
+            color: #6b7280;
+            cursor: not-allowed;
+        }
+
+        .counter button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .request-card {
+            border-left: 4px solid #f59e0b;
+            margin-bottom: 15px;
+        }
+
+        .request-note {
+            font-style: italic;
+            color: #6b7280;
+            margin-bottom: 12px;
+        }
     </style>
 </head>
 <body>
@@ -471,6 +516,11 @@
     <div class="site-nav">
         <a href="index.html">← Velasquez Sports</a>
         <a href="olivia-vball-tracker.html">Olivia's Volleyball →</a>
+    </div>
+
+    <div class="admin-bar" id="adminBar">
+        <span id="adminStatus">Viewing as: Family</span>
+        <a href="#" id="adminToggleLink" onclick="openAdminLoginModal(); return false;">Admin Login</a>
     </div>
 
     <h1>⚾ Dylan's Baseball Career</h1>
@@ -483,6 +533,7 @@
         <button class="tab-btn active" onclick="switchTab('calendar', event)">Calendar</button>
         <button class="tab-btn" onclick="switchTab('tracker', event)">Track Game</button>
         <button class="tab-btn" onclick="switchTab('history', event)">History</button>
+        <button class="tab-btn" id="requestsTabBtn" style="display:none;" onclick="switchTab('requests', event)">Requests</button>
     </div>
 
     <!-- Tracker View -->
@@ -558,6 +609,11 @@
         </div>
         <div id="calendarGrid" class="calendar-grid"></div>
     </div>
+
+    <!-- Requests View (admin only) -->
+    <div id="requests" class="tab-content">
+        <div id="requestsList"></div>
+    </div>
 </div>
 
 <!-- Edit Game Modal -->
@@ -608,15 +664,17 @@
                 </div>
             </div>
 
-            <div class="modal-footer">
+            <div class="modal-footer" id="editModalFooterAdmin">
                 <button type="button" class="btn-cancel" onclick="closeEditModal()">Cancel</button>
                 <button type="submit" class="save-btn" style="margin-top:0">Update Game</button>
+            </div>
+            <div class="modal-footer" id="editModalFooterViewer" style="display:none;">
+                <button type="button" class="btn-cancel" onclick="closeEditModal()">Close</button>
+                <button type="button" class="save-btn" style="margin-top:0" onclick="requestChangeFromEditModal('edit')">Request Change</button>
             </div>
         </form>
     </div>
 </div>
-
-<!-- Add Game Modal (from Calendar) -->
 <div id="addModal" class="modal-overlay">
     <div class="modal">
         <h3>Add Game</h3>
@@ -695,6 +753,39 @@
     </div>
 </div>
 
+<!-- Admin Login Modal -->
+<div id="adminLoginModal" class="modal-overlay">
+    <div class="modal">
+        <h3>Admin Login</h3>
+        <form onsubmit="submitAdminLogin(event)">
+            <div class="form-group">
+                <label for="adminPassInput">Passphrase</label>
+                <input type="password" id="adminPassInput" required>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeAdminLoginModal()">Cancel</button>
+                <button type="submit" class="save-btn" style="margin-top:0">Unlock</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Request Change Modal -->
+<div id="requestChangeModal" class="modal-overlay">
+    <div class="modal">
+        <h3 id="requestChangeTitle">Request a change</h3>
+        <p>Please text Jose/Champ to request this change</p>
+        <div class="form-group">
+            <label for="requestNote">What would you like changed? (optional)</label>
+            <input type="text" id="requestNote" placeholder="e.g., update points to 12">
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeRequestChangeModal()">Cancel</button>
+            <button type="button" class="save-btn" style="margin-top:0" onclick="submitChangeRequest()">Send Request</button>
+        </div>
+    </div>
+</div>
+
 <!-- Firebase Compat Scripts (corrected filenames — no "firebase-compat/" subfolder) -->
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
@@ -705,10 +796,19 @@
     let editStats = { runs: 0, outs: 0, bases: 0, rbi: 0 };
     let addStats = { runs: 0, outs: 0, bases: 0, rbi: 0 };
     let gamesRef = null;
+    let requestsRef = null;
     let allGamesCache = [];
     let calendarViewDate = new Date();
     let pendingDeleteId = null;
     let pendingDayDate = null;
+
+    // NOTE: This is a client-side gate for casual/accidental changes, not real security —
+    // anyone who views this page's source can see this passphrase. It's meant to stop
+    // honest family members from making quick edits, not to withstand a determined bypass.
+    const ADMIN_PASSPHRASE = 'G@meT!mePe0ple';
+    let isAdmin = false;
+    let pendingRequestGameId = null;
+    let pendingRequestType = null;
 
     // ========== PASTE YOUR FIREBASE CONFIG HERE ==========
     const firebaseConfig = {
@@ -731,6 +831,7 @@
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
         gamesRef = db.ref('games');
+        requestsRef = db.ref('changeRequests');
     } catch (err) {
         console.error('Firebase failed to initialize:', err);
         document.getElementById('firebaseWarning').classList.add('active');
@@ -760,6 +861,8 @@
             renderHistory();
         } else if (tabName === 'calendar') {
             renderCalendar();
+        } else if (tabName === 'requests') {
+            renderRequests();
         }
     }
 
@@ -866,7 +969,7 @@
                         </div>
                         <div class="card-actions">
                             <button type="button" class="btn-action edit" onclick="openEditModal('${game.id}')">Edit</button>
-                            <button type="button" class="btn-action delete" onclick="deleteGame('${game.id}')">Delete</button>
+                            <button type="button" class="btn-action delete" onclick="handleDeleteClick('${game.id}')">Delete</button>
                         </div>
                     </div>
                 `;
@@ -930,8 +1033,17 @@
                 document.getElementById('edit_' + key).innerText = editStats[key];
             });
 
+            setEditModalMode(isAdmin);
             document.getElementById('editModal').classList.add('active');
         });
+    }
+
+    function setEditModalMode(adminMode) {
+        document.getElementById('editDate').disabled = !adminMode;
+        document.getElementById('editLocation').disabled = !adminMode;
+        document.querySelectorAll('#editModal .counter button').forEach(btn => btn.disabled = !adminMode);
+        document.getElementById('editModalFooterAdmin').style.display = adminMode ? 'flex' : 'none';
+        document.getElementById('editModalFooterViewer').style.display = adminMode ? 'none' : 'flex';
     }
 
     function closeEditModal() {
@@ -941,6 +1053,7 @@
     function submitEdit(event) {
         event.preventDefault();
         if (!requireFirebase()) return;
+        if (!isAdmin) return;
 
         const id = document.getElementById('editGameId').value;
         const submitBtn = event.target.querySelector('.save-btn');
@@ -1167,6 +1280,214 @@
 
             const csv = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\r\n');
             downloadCSV(csv, 'dylan-baseball-stats.csv');
+        });
+    }
+
+    // ===== Admin login / logout =====
+
+    function openAdminLoginModal() {
+        document.getElementById('adminPassInput').value = '';
+        document.getElementById('adminLoginModal').classList.add('active');
+    }
+
+    function closeAdminLoginModal() {
+        document.getElementById('adminLoginModal').classList.remove('active');
+    }
+
+    function submitAdminLogin(event) {
+        event.preventDefault();
+        const entered = document.getElementById('adminPassInput').value;
+        if (entered === ADMIN_PASSPHRASE) {
+            isAdmin = true;
+            closeAdminLoginModal();
+            updateAdminUI();
+        } else {
+            alert('Incorrect passphrase.');
+        }
+    }
+
+    function logoutAdmin() {
+        isAdmin = false;
+        updateAdminUI();
+    }
+
+    function updateAdminUI() {
+        const bar = document.getElementById('adminBar');
+        const statusEl = document.getElementById('adminStatus');
+        const toggleLink = document.getElementById('adminToggleLink');
+        const requestsTabBtn = document.getElementById('requestsTabBtn');
+
+        if (isAdmin) {
+            bar.classList.add('is-admin');
+            statusEl.innerText = 'Admin Mode: ON';
+            toggleLink.innerText = 'Log Out';
+            toggleLink.onclick = function (e) { e.preventDefault(); logoutAdmin(); };
+            requestsTabBtn.style.display = '';
+            refreshPendingRequestBadge();
+        } else {
+            bar.classList.remove('is-admin');
+            statusEl.innerText = 'Viewing as: Family';
+            toggleLink.innerText = 'Admin Login';
+            toggleLink.onclick = function (e) { e.preventDefault(); openAdminLoginModal(); };
+            requestsTabBtn.style.display = 'none';
+
+            if (document.getElementById('requests').classList.contains('active')) {
+                switchTab('calendar', null);
+                const calBtn = document.querySelector('.tab-btn[onclick*="calendar"]');
+                if (calBtn) calBtn.classList.add('active');
+            }
+        }
+    }
+
+    function refreshPendingRequestBadge() {
+        if (!requestsRef) return;
+        requestsRef.once('value', (snapshot) => {
+            let count = 0;
+            snapshot.forEach(child => { if (child.val().status === 'pending') count++; });
+            const btn = document.getElementById('requestsTabBtn');
+            if (btn) btn.innerText = count > 0 ? `Requests (${count})` : 'Requests';
+        }).catch(error => console.error('Error checking requests:', error));
+    }
+
+    // ===== Non-admin change requests =====
+
+    function handleDeleteClick(id) {
+        if (isAdmin) {
+            deleteGame(id);
+        } else {
+            openRequestChangeModal(id, 'delete');
+        }
+    }
+
+    function requestChangeFromEditModal(type) {
+        const gameId = document.getElementById('editGameId').value;
+        closeEditModal();
+        openRequestChangeModal(gameId, type);
+    }
+
+    function openRequestChangeModal(gameId, type) {
+        pendingRequestGameId = gameId;
+        pendingRequestType = type;
+        document.getElementById('requestChangeTitle').innerText =
+            type === 'delete' ? 'Request to delete this game' : 'Request a change to this game';
+        document.getElementById('requestNote').value = '';
+        document.getElementById('requestChangeModal').classList.add('active');
+    }
+
+    function closeRequestChangeModal() {
+        pendingRequestGameId = null;
+        pendingRequestType = null;
+        document.getElementById('requestChangeModal').classList.remove('active');
+    }
+
+    function submitChangeRequest() {
+        if (!pendingRequestGameId || !requestsRef) {
+            closeRequestChangeModal();
+            return;
+        }
+
+        const note = document.getElementById('requestNote').value.trim();
+        const game = allGamesCache.find(g => g.id === pendingRequestGameId);
+
+        const requestObject = {
+            gameId: pendingRequestGameId,
+            gameLocation: game ? game.location : '',
+            gameDate: game ? game.date : '',
+            type: pendingRequestType,
+            note: note,
+            requestedAt: new Date().toISOString(),
+            status: 'pending'
+        };
+
+        const requestId = String(Date.now());
+        requestsRef.child(requestId).set(requestObject).then(() => {
+            closeRequestChangeModal();
+            alert('Your request has been sent. Please text Jose/Champ to request this change.');
+        }).catch(error => {
+            console.error('Error submitting request:', error);
+            alert('Something went wrong sending your request. Please text Jose/Champ directly.');
+        });
+    }
+
+    // ===== Admin: reviewing requests =====
+
+    function renderRequests() {
+        const container = document.getElementById('requestsList');
+
+        if (!requestsRef) {
+            container.innerHTML = '<div class="empty-state">Firebase is not connected, so requests are unavailable.</div>';
+            return;
+        }
+
+        container.innerHTML = '<div class="loading-state">Loading requests...</div>';
+
+        requestsRef.once('value', (snapshot) => {
+            const allRequests = [];
+            snapshot.forEach(child => allRequests.push({ id: child.key, ...child.val() }));
+
+            const pending = allRequests.filter(r => r.status === 'pending');
+
+            const btn = document.getElementById('requestsTabBtn');
+            if (btn) btn.innerText = pending.length > 0 ? `Requests (${pending.length})` : 'Requests';
+
+            if (pending.length === 0) {
+                container.innerHTML = '<div class="empty-state">No pending requests.</div>';
+                return;
+            }
+
+            pending.sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+
+            container.innerHTML = pending.map(r => {
+                const dateLabel = r.gameDate
+                    ? new Date(r.gameDate).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+                    : 'Unknown date';
+                const typeLabel = r.type === 'delete' ? 'Delete request' : 'Edit request';
+
+                return `
+                    <div class="card request-card">
+                        <div class="history-header">${escapeHtml(typeLabel)}: ${escapeHtml(r.gameLocation || 'Unknown game')}</div>
+                        <div class="history-sub">${dateLabel}</div>
+                        ${r.note ? `<div class="request-note">"${escapeHtml(r.note)}"</div>` : ''}
+                        <div class="card-actions">
+                            <button type="button" class="btn-action edit" onclick="approveRequest('${r.id}')">Approve</button>
+                            <button type="button" class="btn-action delete" onclick="denyRequest('${r.id}')">Deny</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }).catch(error => {
+            console.error('Error loading requests:', error);
+            container.innerHTML = '<div class="empty-state">Error loading requests.</div>';
+        });
+    }
+
+    function denyRequest(requestId) {
+        if (!confirm('Deny this request? The requester will need to reach out again if they still want this change.')) return;
+
+        requestsRef.child(requestId).remove().then(() => {
+            renderRequests();
+        }).catch(error => {
+            console.error('Error denying request:', error);
+            alert('Error denying request.');
+        });
+    }
+
+    function approveRequest(requestId) {
+        requestsRef.child(requestId).once('value', (snapshot) => {
+            const req = snapshot.val();
+            if (!req) return;
+
+            requestsRef.child(requestId).remove().then(() => {
+                renderRequests();
+                if (req.type === 'delete') {
+                    deleteGame(req.gameId);
+                } else {
+                    openEditModal(req.gameId);
+                }
+            }).catch(error => {
+                console.error('Error approving request:', error);
+                alert('Error approving request.');
+            });
         });
     }
 </script>
