@@ -8,6 +8,7 @@
         :root {
             --primary: #4f46e5;
             --primary-hover: #4338ca;
+            --primary-light: #e0e7ff;
             --bg: #f3f4f6;
             --card-bg: #ffffff;
             --text: #1f2937;
@@ -311,6 +312,158 @@
         .btn-cancel:hover {
             background: #e5e7eb;
         }
+
+        .btn-danger {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            background: var(--danger);
+            color: white;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .modal p {
+            color: #6b7280;
+            line-height: 1.5;
+        }
+
+        /* Calendar */
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .calendar-month-label {
+            font-weight: 700;
+            font-size: 1.1em;
+        }
+
+        .cal-nav-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            background: #f9fafb;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .cal-nav-btn:hover {
+            background: #e5e7eb;
+        }
+
+        .calendar-add-row {
+            text-align: right;
+            margin-bottom: 12px;
+        }
+
+        .calendar-add-row .btn-action,
+        .history-actions .btn-action {
+            width: auto;
+            display: inline-block;
+            padding: 8px 14px;
+        }
+
+        .history-actions {
+            text-align: right;
+            margin-bottom: 12px;
+        }
+
+        .calendar-weekdays {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            text-align: center;
+            font-size: 0.75em;
+            font-weight: 600;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+        }
+
+        .calendar-day {
+            min-height: 60px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--card-bg);
+            padding: 4px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            font-size: 0.68em;
+            transition: background 0.15s;
+        }
+
+        .calendar-day:hover {
+            background: #f3f4f6;
+        }
+
+        .calendar-day.empty {
+            background: transparent;
+            border: none;
+            cursor: default;
+        }
+
+        .calendar-day .day-num {
+            font-weight: 700;
+            font-size: 1.15em;
+            margin-bottom: 2px;
+        }
+
+        .calendar-day.today .day-num {
+            color: var(--primary);
+        }
+
+        .calendar-day .day-game {
+            background: var(--primary-light);
+            color: var(--primary);
+            border-radius: 4px;
+            padding: 2px 4px;
+            margin-bottom: 2px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .calendar-day.has-game {
+            border-color: var(--primary);
+        }
+
+        .day-list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+        }
+
+        .day-list-item:last-child {
+            border-bottom: none;
+        }
+
+        .day-list-item:hover {
+            color: var(--primary);
+        }
+
+        .day-list-empty {
+            color: #9ca3af;
+            padding: 12px 0;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -327,12 +480,13 @@
     </div>
 
     <div class="nav-tabs">
-        <button class="tab-btn active" onclick="switchTab('tracker', event)">Track Game</button>
+        <button class="tab-btn active" onclick="switchTab('calendar', event)">Calendar</button>
+        <button class="tab-btn" onclick="switchTab('tracker', event)">Track Game</button>
         <button class="tab-btn" onclick="switchTab('history', event)">History</button>
     </div>
 
     <!-- Tracker View -->
-    <div id="tracker" class="tab-content active">
+    <div id="tracker" class="tab-content">
         <form class="card" onsubmit="saveGame(event)">
             <div class="form-group">
                 <label for="gameDate">Date & Time</label>
@@ -383,7 +537,26 @@
 
     <!-- History View -->
     <div id="history" class="tab-content">
+        <div class="history-actions">
+            <button type="button" class="btn-action edit" onclick="exportHistoryCSV()">Export CSV</button>
+        </div>
         <div id="historyList"></div>
+    </div>
+
+    <!-- Calendar View -->
+    <div id="calendar" class="tab-content active">
+        <div class="calendar-header">
+            <button type="button" class="cal-nav-btn" onclick="changeMonth(-1)">‹</button>
+            <span id="calendarMonthLabel" class="calendar-month-label"></span>
+            <button type="button" class="cal-nav-btn" onclick="changeMonth(1)">›</button>
+        </div>
+        <div class="calendar-add-row">
+            <button type="button" class="btn-action edit" onclick="openAddModal(null)">+ Add Game</button>
+        </div>
+        <div class="calendar-weekdays">
+            <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+        </div>
+        <div id="calendarGrid" class="calendar-grid"></div>
     </div>
 </div>
 
@@ -443,6 +616,85 @@
     </div>
 </div>
 
+<!-- Add Game Modal (from Calendar) -->
+<div id="addModal" class="modal-overlay">
+    <div class="modal">
+        <h3>Add Game</h3>
+        <form id="addForm" onsubmit="submitAdd(event)">
+            <div class="form-group">
+                <label for="addDate">Date & Time</label>
+                <input type="datetime-local" id="addDate" required>
+            </div>
+            <div class="form-group">
+                <label for="addLocation">Location / Opponent</label>
+                <input type="text" id="addLocation" placeholder="e.g., Home vs Rockets" required>
+            </div>
+
+            <div class="stat-row">
+                <span>Good Serve</span>
+                <div class="counter">
+                    <button type="button" onclick="updateAddStat('goodServe', -1)">-</button>
+                    <span id="add_goodServe">0</span>
+                    <button type="button" onclick="updateAddStat('goodServe', 1)">+</button>
+                </div>
+            </div>
+            <div class="stat-row">
+                <span>Points</span>
+                <div class="counter">
+                    <button type="button" onclick="updateAddStat('points', -1)">-</button>
+                    <span id="add_points">0</span>
+                    <button type="button" onclick="updateAddStat('points', 1)">+</button>
+                </div>
+            </div>
+            <div class="stat-row">
+                <span>Assists</span>
+                <div class="counter">
+                    <button type="button" onclick="updateAddStat('assists', -1)">-</button>
+                    <span id="add_assists">0</span>
+                    <button type="button" onclick="updateAddStat('assists', 1)">+</button>
+                </div>
+            </div>
+            <div class="stat-row">
+                <span>Good Try</span>
+                <div class="counter">
+                    <button type="button" onclick="updateAddStat('goodTry', -1)">-</button>
+                    <span id="add_goodTry">0</span>
+                    <button type="button" onclick="updateAddStat('goodTry', 1)">+</button>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeAddModal()">Cancel</button>
+                <button type="submit" class="save-btn" style="margin-top:0">Save Game</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Day Games List Modal (from Calendar day click) -->
+<div id="dayModal" class="modal-overlay">
+    <div class="modal">
+        <h3 id="dayModalTitle">Games</h3>
+        <div id="dayModalList"></div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeDayModal()">Close</button>
+            <button type="button" class="save-btn" style="margin-top:0" onclick="addGameFromDayModal()">+ Add Game</button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="deleteModal" class="modal-overlay">
+    <div class="modal">
+        <h3>Delete this game?</h3>
+        <p id="deleteModalText"></p>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+            <button type="button" class="btn-danger" onclick="confirmDelete()">Delete</button>
+        </div>
+    </div>
+</div>
+
 <!-- Firebase Compat Scripts (corrected filenames — no "firebase-compat/" subfolder) -->
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
@@ -451,7 +703,12 @@
     // Declare state up front so counter buttons work even if Firebase fails to load.
     let stats = { goodServe: 0, points: 0, assists: 0, goodTry: 0 };
     let editStats = { goodServe: 0, points: 0, assists: 0, goodTry: 0 };
+    let addStats = { goodServe: 0, points: 0, assists: 0, goodTry: 0 };
     let gamesRef = null;
+    let allGamesCache = [];
+    let calendarViewDate = new Date();
+    let pendingDeleteId = null;
+    let pendingDayDate = null;
 
     // ========== PASTE YOUR FIREBASE CONFIG HERE ==========
     const firebaseConfig = {
@@ -480,6 +737,7 @@
     }
 
     document.getElementById('gameDate').value = new Date().toISOString().slice(0, 16);
+    renderCalendar();
 
     function updateStat(statKey, change) {
         stats[statKey] = Math.max(0, stats[statKey] + change);
@@ -500,7 +758,30 @@
 
         if (tabName === 'history') {
             renderHistory();
+        } else if (tabName === 'calendar') {
+            renderCalendar();
         }
+    }
+
+    function escapeHtml(str) {
+        return String(str).replace(/[&<>"']/g, ch => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[ch]));
+    }
+
+    function fetchAllGames(callback) {
+        if (!gamesRef) { callback([]); return; }
+        gamesRef.once('value', (snapshot) => {
+            const games = [];
+            snapshot.forEach(childSnapshot => {
+                games.push({ id: childSnapshot.key, ...childSnapshot.val() });
+            });
+            allGamesCache = games;
+            callback(games);
+        }).catch(error => {
+            console.error('Error loading games:', error);
+            callback([]);
+        });
     }
 
     function requireFirebase() {
@@ -558,24 +839,16 @@
 
         historyContainer.innerHTML = '<div class="loading-state">Loading games...</div>';
 
-        gamesRef.once('value', (snapshot) => {
-            const games = [];
-            snapshot.forEach(childSnapshot => {
-                games.push({
-                    id: childSnapshot.key,
-                    ...childSnapshot.val()
-                });
-            });
-
+        fetchAllGames((games) => {
             if (games.length === 0) {
                 historyContainer.innerHTML = '<div class="empty-state">No saved games found yet.</div>';
                 return;
             }
 
             // Sort by date descending (newest first)
-            games.sort((a, b) => new Date(b.date) - new Date(a.date));
+            const sorted = [...games].sort((a, b) => new Date(b.date) - new Date(a.date));
 
-            historyContainer.innerHTML = games.map(game => {
+            historyContainer.innerHTML = sorted.map(game => {
                 const formattedDate = new Date(game.date).toLocaleString([], {
                     dateStyle: 'medium',
                     timeStyle: 'short'
@@ -598,21 +871,46 @@
                     </div>
                 `;
             }).join('');
-        }).catch(error => {
-            console.error('Error loading games:', error);
-            historyContainer.innerHTML = '<div class="empty-state">Error loading games. Check your Firebase config.</div>';
         });
     }
 
     function deleteGame(id) {
         if (!requireFirebase()) return;
-        if (!confirm("Are you sure you want to delete this game?")) return;
+
+        pendingDeleteId = id;
+        const game = allGamesCache.find(g => g.id === id);
+        const deleteText = document.getElementById('deleteModalText');
+        if (game) {
+            const formattedDate = new Date(game.date).toLocaleDateString([], { dateStyle: 'medium' });
+            deleteText.innerText = `This will permanently delete the game vs ${game.location} on ${formattedDate}, including all its stats. This can't be undone.`;
+        } else {
+            deleteText.innerText = "This will permanently delete this game and its stats. This can't be undone.";
+        }
+
+        document.getElementById('deleteModal').classList.add('active');
+    }
+
+    function closeDeleteModal() {
+        pendingDeleteId = null;
+        document.getElementById('deleteModal').classList.remove('active');
+    }
+
+    function confirmDelete() {
+        if (!pendingDeleteId) return;
+        const id = pendingDeleteId;
 
         gamesRef.child(id).remove().then(() => {
-            renderHistory();
+            closeDeleteModal();
+            if (document.getElementById('history').classList.contains('active')) {
+                renderHistory();
+            }
+            if (document.getElementById('calendar').classList.contains('active')) {
+                renderCalendar();
+            }
         }).catch(error => {
             console.error('Error deleting game:', error);
             alert('Error deleting game.');
+            closeDeleteModal();
         });
     }
 
@@ -659,12 +957,216 @@
             submitBtn.disabled = false;
             submitBtn.innerText = 'Update Game';
             closeEditModal();
-            renderHistory();
+            if (document.getElementById('history').classList.contains('active')) {
+                renderHistory();
+            }
+            if (document.getElementById('calendar').classList.contains('active')) {
+                renderCalendar();
+            }
         }).catch(error => {
             console.error('Error updating game:', error);
             submitBtn.disabled = false;
             submitBtn.innerText = 'Update Game';
             alert('Error updating game.');
+        });
+    }
+
+    function renderCalendar() {
+        const grid = document.getElementById('calendarGrid');
+        const label = document.getElementById('calendarMonthLabel');
+
+        const year = calendarViewDate.getFullYear();
+        const month = calendarViewDate.getMonth();
+        label.innerText = calendarViewDate.toLocaleString([], { month: 'long', year: 'numeric' });
+
+        if (!gamesRef) {
+            grid.innerHTML = '<div class="empty-state">Firebase is not connected, so the calendar is unavailable.</div>';
+            return;
+        }
+
+        grid.innerHTML = '<div class="loading-state">Loading calendar...</div>';
+
+        fetchAllGames((games) => {
+            const gamesByDay = {};
+            games.forEach(game => {
+                const dayKey = (game.date || '').slice(0, 10);
+                if (!dayKey) return;
+                if (!gamesByDay[dayKey]) gamesByDay[dayKey] = [];
+                gamesByDay[dayKey].push(game);
+            });
+
+            const firstOfMonth = new Date(year, month, 1);
+            const startWeekday = firstOfMonth.getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const todayKey = new Date().toISOString().slice(0, 10);
+
+            let cellsHtml = '';
+            for (let i = 0; i < startWeekday; i++) {
+                cellsHtml += '<div class="calendar-day empty"></div>';
+            }
+
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dayKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                const dayGames = gamesByDay[dayKey] || [];
+                const isToday = dayKey === todayKey;
+                const hasGame = dayGames.length > 0;
+
+                const gameLabels = dayGames.slice(0, 2).map(g => `<div class="day-game">${escapeHtml(g.location)}</div>`).join('');
+                const moreLabel = dayGames.length > 2 ? `<div class="day-game">+${dayGames.length - 2} more</div>` : '';
+
+                cellsHtml += `
+                    <div class="calendar-day ${isToday ? 'today' : ''} ${hasGame ? 'has-game' : ''}" onclick="openDayModal('${dayKey}')">
+                        <div class="day-num">${d}</div>
+                        ${gameLabels}
+                        ${moreLabel}
+                    </div>
+                `;
+            }
+
+            grid.innerHTML = cellsHtml;
+        });
+    }
+
+    function changeMonth(delta) {
+        calendarViewDate = new Date(calendarViewDate.getFullYear(), calendarViewDate.getMonth() + delta, 1);
+        renderCalendar();
+    }
+
+    function openDayModal(dayKey) {
+        pendingDayDate = dayKey;
+        const dayGames = allGamesCache.filter(g => (g.date || '').slice(0, 10) === dayKey);
+
+        const dateLabel = new Date(dayKey + 'T00:00').toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+        document.getElementById('dayModalTitle').innerText = dateLabel;
+
+        const listEl = document.getElementById('dayModalList');
+        if (dayGames.length === 0) {
+            listEl.innerHTML = '<div class="day-list-empty">No games scheduled this day yet.</div>';
+        } else {
+            listEl.innerHTML = dayGames.map(g => `
+                <div class="day-list-item" onclick="selectDayGame('${g.id}')">
+                    <span>${escapeHtml(g.location)}</span>
+                    <span>›</span>
+                </div>
+            `).join('');
+        }
+
+        document.getElementById('dayModal').classList.add('active');
+    }
+
+    function closeDayModal() {
+        document.getElementById('dayModal').classList.remove('active');
+    }
+
+    function selectDayGame(id) {
+        closeDayModal();
+        openEditModal(id);
+    }
+
+    function addGameFromDayModal() {
+        const prefillDate = pendingDayDate;
+        closeDayModal();
+        openAddModal(prefillDate);
+    }
+
+    function openAddModal(dayKey) {
+        if (!requireFirebase()) return;
+
+        addStats = { goodServe: 0, points: 0, assists: 0, goodTry: 0 };
+        Object.keys(addStats).forEach(key => {
+            document.getElementById('add_' + key).innerText = 0;
+        });
+
+        const defaultDateTime = dayKey ? `${dayKey}T12:00` : new Date().toISOString().slice(0, 16);
+        document.getElementById('addDate').value = defaultDateTime;
+        document.getElementById('addLocation').value = '';
+
+        document.getElementById('addModal').classList.add('active');
+    }
+
+    function closeAddModal() {
+        document.getElementById('addModal').classList.remove('active');
+    }
+
+    function updateAddStat(statKey, change) {
+        addStats[statKey] = Math.max(0, addStats[statKey] + change);
+        document.getElementById('add_' + statKey).innerText = addStats[statKey];
+    }
+
+    function submitAdd(event) {
+        event.preventDefault();
+        if (!requireFirebase()) return;
+
+        const location = document.getElementById('addLocation').value.trim();
+        const date = document.getElementById('addDate').value;
+        if (!location) return;
+
+        const submitBtn = event.target.querySelector('.save-btn');
+        submitBtn.disabled = true;
+        submitBtn.innerText = 'Saving...';
+
+        const gameId = String(Date.now());
+        const gameObject = {
+            date: date,
+            location: location,
+            stats: { ...addStats }
+        };
+
+        gamesRef.child(gameId).set(gameObject).then(() => {
+            submitBtn.disabled = false;
+            submitBtn.innerText = 'Save Game';
+            closeAddModal();
+            renderCalendar();
+        }).catch(error => {
+            console.error('Error saving game:', error);
+            submitBtn.disabled = false;
+            submitBtn.innerText = 'Save Game';
+            alert('Error saving game. Please check your Firebase config.');
+        });
+    }
+
+    function csvEscape(value) {
+        const str = String(value === undefined || value === null ? '' : value);
+        if (/[",\r\n]/.test(str)) {
+            return '"' + str.replace(/"/g, '""') + '"';
+        }
+        return str;
+    }
+
+    function downloadCSV(csvContent, filename) {
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+
+    function exportHistoryCSV() {
+        if (!requireFirebase()) return;
+
+        fetchAllGames((games) => {
+            if (!games || games.length === 0) {
+                alert('No games to export yet.');
+                return;
+            }
+
+            const sorted = [...games].sort((a, b) => new Date(a.date) - new Date(b.date));
+            const headers = ['Date', 'Location/Opponent', 'Good Serve', 'Points', 'Assists', 'Good Try'];
+            const rows = sorted.map(g => [
+                g.date ? new Date(g.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '',
+                g.location || '',
+                g.stats?.goodServe ?? 0,
+                g.stats?.points ?? 0,
+                g.stats?.assists ?? 0,
+                g.stats?.goodTry ?? 0
+            ]);
+
+            const csv = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\r\n');
+            downloadCSV(csv, 'olivia-volleyball-stats.csv');
         });
     }
 </script>
