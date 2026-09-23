@@ -763,8 +763,12 @@
         <h3>Admin Login</h3>
         <form onsubmit="submitAdminLogin(event)">
             <div class="form-group">
-                <label for="adminPassInput">Passphrase</label>
-                <input type="password" id="adminPassInput" required>
+                <label for="adminEmailInput">Email</label>
+                <input type="email" id="adminEmailInput" required autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label for="adminPassInput">Password</label>
+                <input type="password" id="adminPassInput" required autocomplete="current-password">
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn-cancel" onclick="closeAdminLoginModal()">Cancel</button>
@@ -793,6 +797,7 @@
 <!-- Firebase Compat Scripts (corrected filenames — no "firebase-compat/" subfolder) -->
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
 
 <script>
     // Declare state up front so counter buttons work even if Firebase fails to load.
@@ -806,13 +811,74 @@
     let pendingDeleteId = null;
     let pendingDayDate = null;
 
-    // NOTE: This is a client-side gate for casual/accidental changes, not real security —
-    // anyone who views this page's source can see this passphrase. It's meant to stop
-    // honest family members from making quick edits, not to withstand a determined bypass.
-    const ADMIN_PASSPHRASE = 'G@meT!mePe0ple';
+    // Real security: Firebase Authentication + server-side Security Rules enforce that only
+    // the signed-in account matching this UID can edit or delete existing games, or manage
+    // change requests. This UID is not a secret — it's fine for it to appear in the page source;
+    // the actual protection lives in Firebase's Security Rules, checked on Firebase's servers.
+    const ADMIN_UID = '798JVK2fpKZM6Jgvtaz52bRQSTG3';
     let isAdmin = false;
     let pendingRequestGameId = null;
     let pendingRequestType = null;
+
+    // Auto-logout: admin sessions expire after 1 hour of INACTIVITY (not 1 hour from login),
+    // even across page reloads, so you don't have to remember to log out manually. Any
+    // mouse/keyboard/touch/scroll activity resets the clock.
+    const ADMIN_IDLE_MS = 60 * 60 * 1000;
+    const ADMIN_ACTIVITY_EVENTS = ['mousemove', 'keydown', 'click', 'touchstart', 'scroll'];
+    let adminLogoutTimer = null;
+    let lastActivityWriteTime = 0;
+
+    function recordAdminActivity() {
+        if (!isAdmin) return;
+
+        clearTimeout(adminLogoutTimer);
+        adminLogoutTimer = setTimeout(() => {
+            firebase.auth().signOut();
+        }, ADMIN_IDLE_MS);
+
+        // Throttle localStorage writes so we're not writing on every mousemove.
+        const now = Date.now();
+        if (now - lastActivityWriteTime > 10000) {
+            lastActivityWriteTime = now;
+            try { localStorage.setItem('adminLastActivity', String(now)); } catch (e) { /* ignore */ }
+        }
+    }
+
+    function scheduleAdminAutoLogout() {
+        ADMIN_ACTIVITY_EVENTS.forEach(evt => document.removeEventListener(evt, recordAdminActivity));
+
+        let lastActivity = null;
+        try {
+            lastActivity = parseInt(localStorage.getItem('adminLastActivity'), 10);
+        } catch (e) {
+            lastActivity = null;
+        }
+
+        if (!lastActivity || isNaN(lastActivity)) {
+            lastActivity = Date.now();
+            try { localStorage.setItem('adminLastActivity', String(lastActivity)); } catch (e) { /* ignore */ }
+        }
+
+        const remaining = ADMIN_IDLE_MS - (Date.now() - lastActivity);
+
+        clearTimeout(adminLogoutTimer);
+        if (remaining <= 0) {
+            firebase.auth().signOut();
+            return;
+        }
+
+        adminLogoutTimer = setTimeout(() => {
+            firebase.auth().signOut();
+        }, remaining);
+
+        ADMIN_ACTIVITY_EVENTS.forEach(evt => document.addEventListener(evt, recordAdminActivity));
+    }
+
+    function clearAdminAutoLogout() {
+        clearTimeout(adminLogoutTimer);
+        try { localStorage.removeItem('adminLastActivity'); } catch (e) { /* ignore */ }
+        ADMIN_ACTIVITY_EVENTS.forEach(evt => document.removeEventListener(evt, recordAdminActivity));
+    }
 
     // ========== PASTE YOUR FIREBASE CONFIG HERE ==========
     const firebaseConfig = {
@@ -836,6 +902,16 @@
         const db = firebase.database();
         gamesRef = db.ref('games');
         requestsRef = db.ref('changeRequests');
+
+        firebase.auth().onAuthStateChanged((user) => {
+            isAdmin = !!user && user.uid === ADMIN_UID;
+            updateAdminUI();
+            if (isAdmin) {
+                scheduleAdminAutoLogout();
+            } else {
+                clearAdminAutoLogout();
+            }
+        });
     } catch (err) {
         console.error('Firebase failed to initialize:', err);
         document.getElementById('firebaseWarning').classList.add('active');
@@ -1290,6 +1366,7 @@
     // ===== Admin login / logout =====
 
     function openAdminLoginModal() {
+        document.getElementById('adminEmailInput').value = '';
         document.getElementById('adminPassInput').value = '';
         document.getElementById('adminLoginModal').classList.add('active');
     }
@@ -1300,19 +1377,38 @@
 
     function submitAdminLogin(event) {
         event.preventDefault();
-        const entered = document.getElementById('adminPassInput').value;
-        if (entered === ADMIN_PASSPHRASE) {
-            isAdmin = true;
-            closeAdminLoginModal();
-            updateAdminUI();
-        } else {
-            alert('Incorrect passphrase.');
+
+        if (typeof firebase === 'undefined' || !firebase.auth) {
+            alert('Firebase is not connected right now, so admin login is unavailable.');
+            return;
         }
+
+        const email = document.getElementById('adminEmailInput').value.trim();
+        const password = document.getElementById('adminPassInput').value;
+        const submitBtn = event.target.querySelector('.save-btn');
+        submitBtn.disabled = true;
+        submitBtn.innerText = 'Signing in...';
+
+        firebase.auth().signInWithEmailAndPassword(email, password).then(() => {
+            try { localStorage.setItem('adminLastActivity', String(Date.now())); } catch (e) { /* ignore */ }
+            submitBtn.disabled = false;
+            submitBtn.innerText = 'Unlock';
+            closeAdminLoginModal();
+            // isAdmin and the UI update automatically via onAuthStateChanged.
+        }).catch((error) => {
+            console.error('Admin login failed:', error);
+            submitBtn.disabled = false;
+            submitBtn.innerText = 'Unlock';
+            alert('Login failed: ' + (error.message || 'Please check your email and password.'));
+        });
     }
 
     function logoutAdmin() {
-        isAdmin = false;
-        updateAdminUI();
+        if (typeof firebase === 'undefined' || !firebase.auth) return;
+        firebase.auth().signOut().catch((error) => {
+            console.error('Error signing out:', error);
+        });
+        // isAdmin and the UI update automatically via onAuthStateChanged.
     }
 
     function updateAdminUI() {
